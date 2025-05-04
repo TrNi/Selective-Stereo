@@ -27,7 +27,7 @@ def load_image(imfile):
 
 def demo2(args):
     model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
-    model.load_state_dict(torch.load(args.restore_ckpt))
+    model.load_state_dict(torch.load(args.restore_ckpt, weights_only=False))
 
     model = model.module
     model.to(DEVICE)
@@ -44,8 +44,8 @@ def demo2(args):
         # for (imfile1, imfile2) in tqdm(list(zip(left_images, right_images))):
 
         # Load batched images and convert to tensors
-        left_np = np.load(left_npy_file)     # (N, H, W, C)
-        right_np = np.load(right_npy_file)   # (N, H, W, C)
+        left_np = np.load(args.left_imgs)     # (N, H, W, C)
+        right_np = np.load(args.right_imgs)   # (N, H, W, C)
 
         # Transpose to (N, C, H, W) and move to GPU
         image0 = torch.from_numpy(left_np).permute(0, 3, 1, 2).float().cuda()
@@ -54,26 +54,29 @@ def demo2(args):
         padder = InputPadder(image0.shape, divis_by=32)
         image0, image1 = padder.pad(image0, image1)
 
-        disp = model(image0, image1, iters=args.valid_iters, test_mode=True)
+        disp = model(image0[:3,...], image1[:3,...], iters=args.valid_iters, test_mode=True)
         disp = disp.cpu().numpy()
-        disp = padder.unpad(disp.float()).squeeze()
+        disp = padder.unpad(disp).squeeze()
 
 
         # file_stem = imfile1.split("/")[-2]
         # filename = os.path.join(output_directory, f"{file_stem}.png")
         plt.figure()
-        plt.imshow(disp, cmap="jet")
-        plt.show()
-        stereo_params = np.load(stereo_params_npz_file, allow_pickle = True)
+        
+        stereo_params = np.load(args.stereo_params_npz_file, allow_pickle = True)
     
         P1 = stereo_params['P1']
         # P1[:2] *= args.scale
         f_left = P1[0,0]
         baseline = stereo_params['baseline']
         depth = f_left*baseline/(disp+1e-6)
-        plt.imshow(depth, cmap="jet")
+        plt.subplot(211)
+        plt.imshow(disp[0,:,:], cmap="jet")        
+        plt.subplot(212)
+        plt.imshow(depth[0,:,:], cmap="jet")
         plt.show()
-        np.save(output_path, depth)
+        #input()
+        np.save(args.output_path, depth)
 
 
 if __name__ == "__main__":
