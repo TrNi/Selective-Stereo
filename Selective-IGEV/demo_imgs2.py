@@ -13,6 +13,7 @@ from PIL import Image
 from matplotlib import pyplot as plt
 import os
 import torch.nn.functional as F
+import h5py
 
 DEVICE = "cuda"
 import os
@@ -36,47 +37,50 @@ def demo2(args):
     output_directory = Path(args.output_directory)
     output_directory.mkdir(exist_ok=True)
 
-    with torch.no_grad():
-        # left_images = sorted(glob.glob(args.left_imgs, recursive=True))
-        # right_images = sorted(glob.glob(args.right_imgs, recursive=True))
-        # print(f"Found {len(left_images)} images. Saving files to {output_directory}/")
-
-        # for (imfile1, imfile2) in tqdm(list(zip(left_images, right_images))):
-
-        # Load batched images and convert to tensors
-        left_np = np.load(args.left_imgs)     # (N, H, W, C)
-        right_np = np.load(args.right_imgs)   # (N, H, W, C)
-
-        # Transpose to (N, C, H, W) and move to GPU
-        image0 = torch.from_numpy(left_np).permute(0, 3, 1, 2).float().cuda()
-        image1 = torch.from_numpy(right_np).permute(0, 3, 1, 2).float().cuda()
+    # Create output HDF5 file
+    with h5py.File(args.output_path, 'w') as f_out, \
+         h5py.File(args.left_imgs, 'r') as f_left, \
+         h5py.File(args.right_imgs, 'r') as f_right:
         
-        padder = InputPadder(image0.shape, divis_by=32)
-        image0, image1 = padder.pad(image0, image1)
-
-        disp = model(image0[:3,...], image1[:3,...], iters=args.valid_iters, test_mode=True)
-        disp = disp.cpu().numpy()
-        disp = padder.unpad(disp).squeeze()
-
-
-        # file_stem = imfile1.split("/")[-2]
-        # filename = os.path.join(output_directory, f"{file_stem}.png")
-        plt.figure()
+        left_data = f_left['left']
+        right_data = f_right['right']
+        N = left_data.shape[0]
         
-        stereo_params = np.load(args.stereo_params_npz_file, allow_pickle = True)
-    
-        P1 = stereo_params['P1']
-        # P1[:2] *= args.scale
-        f_left = P1[0,0]
-        baseline = stereo_params['baseline']
-        depth = f_left*baseline/(disp+1e-6)
-        plt.subplot(211)
-        plt.imshow(disp[0,:,:], cmap="jet")        
-        plt.subplot(212)
-        plt.imshow(depth[0,:,:], cmap="jet")
-        plt.show()
-        #input()
-        np.save(args.output_path, depth)
+        # Create datasets in output file
+        disp_dset = f_out.create_dataset('disp', (N, left_data.shape[1], left_data.shape[2]), 
+                                       dtype='float16', compression='gzip')
+        depth_dset = f_out.create_dataset('depth', (N, left_data.shape[1], left_data.shape[2]), 
+                                        dtype='float16', compression='gzip')
+        
+        # Process in batches
+        for i in tqdm(range(0, N, args.batch_size)):
+            batch_size = min(args.batch_size, N - i)
+            
+            # Load batch
+            left_batch = left_data[i:i+batch_size]
+            right_batch = right_data[i:i+batch_size]
+            
+            # Convert to tensor and process
+            image0 = torch.from_numpy(left_batch).permute(0, 3, 1, 2).float().cuda()
+            image1 = torch.from_numpy(right_batch).permute(0, 3, 1, 2).float().cuda()
+            
+            padder = InputPadder(image0.shape, divis_by=32)
+            image0, image1 = padder.pad(image0, image1)
+
+            with torch.no_grad():
+                disp = model(image0, image1, iters=args.valid_iters, test_mode=True)
+                disp = padder.unpad(disp).cpu().numpy()
+            
+            # Calculate depth if stereo params are provided
+            if args.stereo_params_npz_file:
+                stereo_params = np.load(args.stereo_params_npz_file, allow_pickle=True)
+                P1 = stereo_params['P1']
+                f_left = P1[0,0]
+                baseline = stereo_params['baseline']
+                depth = f_left * baseline / (disp + 1e-6)
+                depth_dset[i:i+batch_size] = depth.astype('float16')
+            
+            disp_dset[i:i+batch_size] = disp.astype('float16')
 
 
 if __name__ == "__main__":
@@ -91,6 +95,7 @@ if __name__ == "__main__":
     parser.add_argument("--mixed_precision", action="store_true", help="use mixed precision")
     parser.add_argument("--precision_dtype",default="float16",choices=["float16", "bfloat16", "float32"],help="Choose precision type: float16 or bfloat16 or float32")
     parser.add_argument("--valid_iters",type=int,default=32,help="number of flow-field updates during forward pass")
+    parser.add_argument("--batch_size", type=int, default=4, help="batch size for processing")
 
     # Architecture choices
     parser.add_argument("--hidden_dims",nargs="+",type=int,default=[128] * 3,help="hidden state and context dimensions")
