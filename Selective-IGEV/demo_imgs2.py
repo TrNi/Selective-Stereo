@@ -15,7 +15,18 @@ import os
 import torch.nn.functional as F
 import h5py
 
-DEVICE = "cuda"
+def resize_image(img_hwc, target_h, target_w, interpolation=cv2.INTER_LINEAR):
+    # img_chw: H x W x C numpy array    
+    resized_hwc = cv2.resize(img_hwc, (target_w, target_h), interpolation=interpolation)
+    
+    return resized_hwc
+
+def resize_batch(batch_nhwc, target_h, target_w, interpolation=cv2.INTER_LINEAR):
+    return np.stack([resize_image(img, target_h, target_w, interpolation) for img in batch_nhwc])
+
+
+DEVICE = 'cuda'
+
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -27,6 +38,40 @@ def load_image(imfile):
 
 
 def demo2(args):
+    
+
+    output_directory = Path(args.output_directory)
+    os.makedirs(output_directory, exist_ok=True)
+
+    stereo_params = np.load(args.stereo_params_npz_file, allow_pickle=True)
+    P1 = stereo_params['P1']
+    #P1[:2] *= args.scale
+    f_left = P1[0,0]
+    baseline = stereo_params['baseline']
+
+
+    if args.left_h5_file and args.right_h5_file:
+        try:
+            with h5py.File(args.left_h5_file, 'r') as f:
+                left_all = f['data'][()]   # or np.array(f['left'])
+            with h5py.File(args.right_h5_file, 'r') as f:
+                right_all = f['data'][()]
+        except Exception as e:            
+            with h5py.File(args.left_h5_file, 'r') as f:
+                left_all = f['left'][()]   # or np.array(f['left'])
+            with h5py.File(args.right_h5_file, 'r') as f:
+                right_all = f['right'][()]
+      
+        print(left_all.shape, right_all.shape)
+    if left_all.ndim==3:
+        left_all = left_all[None]
+        right_all = right_all[None]
+
+    N,C,H,W = left_all.shape
+    args.max_disp = np.ceil(W/resize_factor/4).astype(int)
+    resize_factor = 1.5
+    print(f"Found {N} images. Saving files to {out_dir}.")
+
     model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
     model.load_state_dict(torch.load(args.restore_ckpt, weights_only=False))
 
@@ -34,69 +79,59 @@ def demo2(args):
     model.to(DEVICE)
     model.eval()
 
-    output_directory = Path(args.output_directory)
-    output_directory.mkdir(exist_ok=True)
 
-    # Create output HDF5 file
-    with h5py.File(args.output_path, 'w') as f_out, \
-         h5py.File(args.left_imgs, 'r') as f_left, \
-         h5py.File(args.right_imgs, 'r') as f_right:
-        
-        left_data = f_left['left']
-        right_data = f_right['right']
-        N = left_data.shape[0]
-        
-        # Create datasets in output file
-        disp_dset = f_out.create_dataset('disp', (N, left_data.shape[1], left_data.shape[2]), 
-                                       dtype='float16', compression='gzip')
-        depth_dset = f_out.create_dataset('depth', (N, left_data.shape[1], left_data.shape[2]), 
-                                        dtype='float16', compression='gzip')
-        
-        # Process in batches
-        for i in tqdm(range(0, N, args.batch_size)):
-            batch_size = min(args.batch_size, N - i)
-            
-            # Load batch
-            left_batch = left_data[i:i+batch_size]
-            right_batch = right_data[i:i+batch_size]
-            
-            # Convert to tensor and process
-            image0 = torch.from_numpy(left_batch).permute(0, 3, 1, 2).float().cuda()
-            image1 = torch.from_numpy(right_batch).permute(0, 3, 1, 2).float().cuda()
-            
-            padder = InputPadder(image0.shape, divis_by=32)
-            image0, image1 = padder.pad(image0, image1)
+    disp_all = []
+    depth_all = []
 
-            with torch.no_grad():
-                disp = model(image0, image1, iters=args.valid_iters, test_mode=True)
-                disp = padder.unpad(disp).cpu().numpy()
+    with torch.no_grad():     
+        for i in tqdm(range(0, N, args.batch_size), desc="Processing batches"):  
+            img0 = left_all[i:i+args.batch_size]
+            img1 = right_all[i:i+args.batch_size]
+
+            if len(img0.shape)==3:
+                img0 = img0[None,...]
+
+            if len(img1.shape)==3:
+                img1 = img1[None,...]
+
+            img0 = resize_batch(img0, round(H/resize_factor) ,round(W/resize_factor))
+            img1 = resize_batch(img1, round(H/resize_factor), round(W/resize_factor))
+
+            img0 = torch.as_tensor(img0).cuda().float()
+            img1 = torch.as_tensor(img1).cuda().float()
+
+            with autocast("cuda",enabled=args.mixed_precision):
+                disp = model(img0, img1, iters=args.valid_iters, test_mode=True)
+                disp = padder.unpad(disp).cpu().squeeze().numpy()            
             
-            # Calculate depth if stereo params are provided
-            if args.stereo_params_npz_file:
-                stereo_params = np.load(args.stereo_params_npz_file, allow_pickle=True)
-                P1 = stereo_params['P1']
-                f_left = P1[0,0]
-                baseline = stereo_params['baseline']
-                depth = f_left * baseline / (disp + 1e-6)
-                depth_dset[i:i+batch_size] = depth.astype('float16')
-            
-            disp_dset[i:i+batch_size] = disp.astype('float16')
+            depth = f_left * baseline / (disp + 1e-6)
+            depth_all.append(depth)        
+            disp_all.append(disp)
+    disp_all = np.concatenate(disp_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
+    depth_all = np.concatenate(depth_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
+
+    with h5py.File(args.output_path, 'w') as f_out:
+        f_out.create_dataset('disp', data=disp_all, compression='gzip')
+        f_out.create_dataset('depth', data=depth_all, compression='gzip')   
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=4, help="batch size for processing")
     parser.add_argument("--restore_ckpt", help="restore checkpoint", default=None)
+    parser.add_argument("--left_h5_file", default="", type=str)
+    parser.add_argument("--right_h5_file", default="", type=str)
+    parser.add_argument("--stereo_params_npz_file", default = "", type = str)        
+    parser.add_argument("--out_dir", default=f'../output/', type=str, help='the directory to save results')
     parser.add_argument("--save_numpy", action="store_true", help="save output as numpy arrays")
-    parser.add_argument("-l", "--left_imgs", help="path to all first (left) frames", default=None)
-    parser.add_argument("-r", "--right_imgs", help="path to all second (right) frames", default=None)
-    parser.add_argument("--stereo_params_npz_file", help="path to stereo parameters npz file", default=None)
-    parser.add_argument("--output_path", help="path to save output", default=None)
-    parser.add_argument("--output_directory", help="directory to save output", default=None)
+    # parser.add_argument("-l", "--left_imgs", help="path to all first (left) frames", default=None)
+    # parser.add_argument("-r", "--right_imgs", help="path to all second (right) frames", default=None)
+    # parser.add_argument("--stereo_params_npz_file", help="path to stereo parameters npz file", default=None)
+    # parser.add_argument("--output_path", help="path to save output", default=None)
+    # parser.add_argument("--output_directory", help="directory to save output", default=None)
     parser.add_argument("--mixed_precision", action="store_true", help="use mixed precision")
     parser.add_argument("--precision_dtype",default="float16",choices=["float16", "bfloat16", "float32"],help="Choose precision type: float16 or bfloat16 or float32")
     parser.add_argument("--valid_iters",type=int,default=32,help="number of flow-field updates during forward pass")
-    parser.add_argument("--batch_size", type=int, default=4, help="batch size for processing")
-
     # Architecture choices
     parser.add_argument("--hidden_dims",nargs="+",type=int,default=[128] * 3,help="hidden state and context dimensions")
     parser.add_argument("--corr_implementation",choices=["reg", "alt", "reg_cuda", "alt_cuda"],default="reg",help="correlation volume implementation")
