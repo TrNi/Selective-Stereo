@@ -107,7 +107,7 @@ def demo2(args):
             img0 = torch.as_tensor(img0).cuda().float()
             img1 = torch.as_tensor(img1).cuda().float()
 
-            with torch.amp.autocast("cuda",True):
+            with torch.amp.autocast("cuda",enabled=True):
                 disp = model(img0, img1, iters=args.valid_iters, test_mode=True)
                 disp = padder.unpad(disp).cpu().squeeze().numpy()            
             
