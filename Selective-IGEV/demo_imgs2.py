@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 import os
 import torch.nn.functional as F
 import h5py
+import cv2
 
 def resize_image(img_chw, target_h, target_w, interpolation=cv2.INTER_LINEAR):
     # img_chw: C x H x W numpy array    
