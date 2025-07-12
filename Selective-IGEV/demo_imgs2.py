@@ -42,8 +42,8 @@ def load_image(imfile):
 def demo2(args):
     
 
-    output_directory = Path(args.output_directory)
-    os.makedirs(output_directory, exist_ok=True)
+    out_dir = Path(args.out_dir)
+    os.makedirs(out_dir, exist_ok=True)
 
     stereo_params = np.load(args.stereo_params_npz_file, allow_pickle=True)
     P1 = stereo_params['P1']
@@ -118,7 +118,7 @@ def demo2(args):
     disp_all = np.concatenate(disp_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
     depth_all = np.concatenate(depth_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
 
-    with h5py.File(args.output_path, 'w') as f_out:
+    with h5py.File(out_dir/'leftview_disp_depth.h5', 'w') as f_out:
         f_out.create_dataset('disp', data=disp_all, compression='gzip')
         f_out.create_dataset('depth', data=depth_all, compression='gzip')   
 
