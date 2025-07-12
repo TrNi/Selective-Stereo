@@ -69,6 +69,10 @@ def demo2(args):
         right_all = right_all[None]
 
     N,C,H,W = left_all.shape
+    if args.process_only:
+        N_stop = args.process_only
+    else:
+        N_stop = N
     args.max_disp = np.ceil(W/resize_factor/4).astype(int)
     resize_factor = 1.5
     print(f"Found {N} images. Saving files to {out_dir}.")
@@ -108,6 +112,8 @@ def demo2(args):
             depth = f_left * baseline / (disp + 1e-6)
             depth_all.append(depth)        
             disp_all.append(disp)
+            if i+batch_size >= N_stop:
+                break
     disp_all = np.concatenate(disp_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
     depth_all = np.concatenate(depth_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
 
@@ -125,6 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--stereo_params_npz_file", default = "", type = str)        
     parser.add_argument("--out_dir", default=f'../output/', type=str, help='the directory to save results')
     parser.add_argument("--save_numpy", action="store_true", help="save output as numpy arrays")
+    parser.add_argument("--process_only",default=None,type=int)
     # parser.add_argument("-l", "--left_imgs", help="path to all first (left) frames", default=None)
     # parser.add_argument("-r", "--right_imgs", help="path to all second (right) frames", default=None)
     # parser.add_argument("--stereo_params_npz_file", help="path to stereo parameters npz file", default=None)
