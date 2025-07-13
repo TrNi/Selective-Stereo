@@ -64,26 +64,41 @@ class hourglass(nn.Module):
         self.feature_att_up_8 = FeatureAtt(in_channels*2, 64)
 
     def forward(self, x, features):
+        print("x", x.shape)
         conv1 = self.conv1(x)
+        print("conv1", conv1.shape)
         conv1 = self.feature_att_8(conv1, features[1])
+        print("conv1", conv1.shape)
 
         conv2 = self.conv2(conv1)
+        print("conv2", conv2.shape)
         conv2 = self.feature_att_16(conv2, features[2])
 
         conv3 = self.conv3(conv2)
+        print("conv3", conv3.shape)
         conv3 = self.feature_att_32(conv3, features[3])
+        print("conv3", conv3.shape)
 
         conv3_up = self.conv3_up(conv3)
+        print("conv3_up", conv3_up.shape)
         conv2 = torch.cat((conv3_up, conv2), dim=1)
+        print("conv2", conv2.shape)
         conv2 = self.agg_0(conv2)
+        print("conv2", conv2.shape)
         conv2 = self.feature_att_up_16(conv2, features[2])
+        print("conv2", conv2.shape)
 
         conv2_up = self.conv2_up(conv2)
+        print("conv2_up", conv2_up.shape)
         conv1 = torch.cat((conv2_up, conv1), dim=1)
+        print("conv1", conv1.shape)
         conv1 = self.agg_1(conv1)
+        print("conv1", conv1.shape)
         conv1 = self.feature_att_up_8(conv1, features[1])
+        print("conv1", conv1.shape)
 
         conv = self.conv1_up(conv1)
+        print("conv", conv.shape)
 
         return conv
 
@@ -164,6 +179,7 @@ class IGEVStereo(nn.Module):
 
             match_left = self.desc(self.conv(features_left[0]))
             match_right = self.desc(self.conv(features_right[0]))
+            print("match_left", match_left.shape, "self.args.max_disp//4", self.args.max_disp//4)
             gwc_volume = build_gwc_volume(match_left, match_right, self.args.max_disp//4, 8)
             gwc_volume = self.corr_stem(gwc_volume)
             gwc_volume = self.corr_feature_att(gwc_volume, features_left[0])
