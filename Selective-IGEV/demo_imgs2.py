@@ -114,7 +114,7 @@ def demo2(args):
             depth = f_left * baseline / (disp + 1e-6)
             depth_all.append(depth)        
             disp_all.append(disp)
-            if i+batch_size >= N_stop:
+            if i+args.batch_size >= N_stop:
                 break
     disp_all = np.concatenate(disp_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
     depth_all = np.concatenate(depth_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
