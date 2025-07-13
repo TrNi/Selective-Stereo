@@ -76,7 +76,7 @@ def demo2(args):
         N_stop = N
     N_max = N_stop
     resize_factor = 1.5
-    args.max_disp = np.ceil(W/resize_factor/4).astype(int)
+    args.max_disp = int(np.ceil(W/resize_factor/4/64/3)*64*3)
     print(f"Found {N} images. Saving files to {out_dir}.")
 
     model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
