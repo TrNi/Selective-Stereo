@@ -107,10 +107,10 @@ def demo2(args):
 
             img0 = torch.as_tensor(img0).cuda().float()
             img1 = torch.as_tensor(img1).cuda().float()
-            print(img0.min(), img0.max())
+            print(img0.min(), img0.max(), img0.shape)
             padder = InputPadder(img0.shape)
             img0, img1 = padder.pad(img0, img1)
-
+            print(img0.shape)
             with torch.amp.autocast("cuda",enabled=True):
                 disp = model(img0, img1, iters=args.valid_iters, test_mode=True)
                 disp = padder.unpad(disp).cpu().squeeze().numpy()            
