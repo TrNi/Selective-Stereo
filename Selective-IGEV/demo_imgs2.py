@@ -74,7 +74,7 @@ def demo2(args):
         N_stop = args.process_only
     else:
         N_stop = N
-    
+    N_max = N_stop
     resize_factor = 1.5
     args.max_disp = np.ceil(W/resize_factor/4).astype(int)
     print(f"Found {N} images. Saving files to {out_dir}.")
@@ -115,9 +115,10 @@ def demo2(args):
             depth_all.append(depth)        
             disp_all.append(disp)
             if i+args.batch_size >= N_stop:
+                N_max = i + img0.shape[0]
                 break
-    disp_all = np.concatenate(disp_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
-    depth_all = np.concatenate(depth_all, axis=0).reshape(N,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
+    disp_all = np.concatenate(disp_all, axis=0).reshape(N_max,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
+    depth_all = np.concatenate(depth_all, axis=0).reshape(N_max,round(H/resize_factor),round(W/resize_factor)).astype(np.float16)
 
     with h5py.File(out_dir/'leftview_disp_depth.h5', 'w') as f_out:
         f_out.create_dataset('disp', data=disp_all, compression='gzip')
