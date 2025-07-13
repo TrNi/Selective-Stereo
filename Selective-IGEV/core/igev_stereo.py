@@ -170,10 +170,13 @@ class IGEVStereo(nn.Module):
         with autocast("cuda",enabled=self.args.mixed_precision, dtype=getattr(torch, self.args.precision_dtype, torch.float16)):
             features_left = self.feature(image1)
             features_right = self.feature(image2)
+            print("features_left", features_left.shape)
             stem_2x = self.stem_2(image1)
             stem_4x = self.stem_4(stem_2x)
+            print("stem_4x", stem_4x.shape)
             stem_2y = self.stem_2(image2)
             stem_4y = self.stem_4(stem_2y)
+            print("stem_4y", stem_4y.shape)
             features_left[0] = torch.cat((features_left[0], stem_4x), 1)
             features_right[0] = torch.cat((features_right[0], stem_4y), 1)
 
