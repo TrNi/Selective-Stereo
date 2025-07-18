@@ -75,10 +75,16 @@ def demo2(args):
     else:
         N_stop = N
     N_max = N_stop
-    resize_factor = 1.5
+    # aspect ratio for Canon EOS 6D is 3/2. 3648
+    # image size of about 1586x2379 works with batch_size of 1, 
+    # with resize_factor of 2.3 at 28s/image, up to ~25 images.
+    small_dim = min(H,W)
+    large_dim = max(H,W)
+    resize_factor = max(round(small_dim/1586,1), round(large_dim/2379,1))
+    # resize_factor = 1.5
+    print(f"Found {N} images,  applying resize_factor {resize_factor} Saving files to {out_dir}.")
     args.max_disp = int(np.ceil(W/resize_factor/4/64/3)*64*3)
-    print("args.max_disp", args.max_disp)
-    print(f"Found {N} images. Saving files to {out_dir}.")
+    print("args.max_disp", args.max_disp)    
 
     model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
     model.load_state_dict(torch.load(args.restore_ckpt, weights_only=False))
